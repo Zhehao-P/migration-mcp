@@ -34,34 +34,53 @@ BASE_DIR = Path(__file__).parent
 
 
 SYSTEM_PROMPT = """
-This MCP server is used to validate the E2E test suite.
-It provides resources to help you understand the repository structure and the test framework.
-It also provides tools to validate both Terraform topology and python test logic coverage
-and syntax.
-Please use the tools to validate the migration work you have done, and fix all issues found.
+This MCP server guides and validates the E2E test suite migration.
 
-IMPORTANT:
-- Always check the context here when you need more context about the migration task.
-- Always use both coverage validation tools again when any changes are made to the test suite.
-- Always use Terraform syntax validation after both coverage validation results are acceptable.
-- Always use Python syntax validation at very end when all other tools hit no issue.
-- Always run the syntax validation tools command in the given directory.
+Your tasks:
+1) Understand repository/test structure and migration context (use the get_context tool).
+2) Validate Terraform topology coverage and Python test logic coverage.
+3) When both coverage validations pass, prepare and run syntax validations in the specified directories.
+4) Surface clear, actionable differences if any, and keep outputs concise.
 
-If python syntax validation is run, and both report and logs show no error you can claim the
-test suite migration is complete.
+Post-change protocol (run this after EVERY code change):
+1) Terraform coverage
+   - Call terraform_coverage_validation with regression and cloudn paths.
+   - Parse the last line: "Overall Verdict: True | False | Error".
+   - If verdict != True: STOP and output a numbered Differences list with concrete fixes.
+2) Terraform syntax
+   - If Terraform coverage is True: call prepare_terraform_syntax_validation(test_suite_name).
+   - Present execution_path and execution_command. Run in that directory.
+   - If syntax errors appear in logs/output: STOP and report them.
+3) Python coverage
+   - Only after Terraform coverage and syntax are OK: call python_coverage_validation.
+   - Parse the last line: "Overall Verdict: True | Ok | False | Error".
+   - If verdict in {False, Error}: STOP and output a numbered Differences list with concrete fixes.
+4) Python syntax
+   - If Python coverage is True or Ok: call entire_test_validation_preparation(test_suite_name).
+   - Present execution_path and execution_command. Run in that directory.
+   - If syntax errors appear in logs/output: STOP and report them.
+
+Rules:
+- Be precise, deterministic, and concise. Prefer bullet points over long prose.
+- Only include facts from provided contexts. If context is insufficient, return an explicit error reason.
+- Ignore non-semantic differences (formatting, comments, import order, cosmetic renames without behavior change).
+- Use the exact verdict labels defined by each tool (Terraform: True/False/Error; Python: True/Ok/False/Error).
+- Keep your analysis ≤ 600 tokens unless explicitly allowed.
+
+Completion criteria:
+- Coverage validations acceptable.
+- Syntax validations run in the specified directories, with reports/logs showing no errors.
 """
 
 CLOUDN_E2E_FRAMEWORK_PROMPT = """
-In e2e test, the test framework will provide the provider credential file, and apply
-the Terraform module to create the test topology before running the test.
-You can use the test with name mc_spoke_transit_spoke_test under the test directory
-as an example to understand the test framework.
-vars.tf will be used to get variables for the test from the provider credential file
-provided by the test framework. And outputs.tf will be used to export Terraform output
-values for the test.
-vm_east = tf.vm(tf.outputs["aws_vm_east_public"]["value"]["name"]) in the
-mc_spoke_transit_spoke_test.py is an example of how to get the value of the Terraform
-output for the test.
+Cloudn E2E framework basics:
+- The framework provides a provider credential file (provider_cred.tfvars). Do not modify it.
+- Terraform topologies are applied before test execution. Variables come from vars.tf; outputs are exported via outputs.tf.
+- Use exported Terraform outputs in tests (e.g., tf.outputs["..."].value["name"]) to retrieve runtime values.
+- Typical pitfalls to avoid:
+  1) Mismatched variable names between test code and tfvars.
+  2) Forgetting to reference outputs for runtime resources.
+  3) Treating comments/formatting differences as semantic changes.
 """
 
 
@@ -228,34 +247,32 @@ async def terraform_coverage_validation(
     """
 
     system_prompt = """
-    You are a helpful Hashicorp Terraform expert.
-    You will be given two Terraform topology, one is the expected topology,
-    and the other is the actual topology.
-    You will need to validate the actual topology against the expected topology.
+    You are a deterministic Terraform topology diff engine.
 
-    Please focus on the following aspects:
-    1. The number of resources in the topology
-    2. The type of resources in the topology
-    3. The configuration of the resources in the topology
-    4. The relationship between the resources in the topology
+    Task:
+    - Compare the expected and actual topologies provided by the user.
+    - Decide if they create the same effective infrastructure.
 
-    If they will be creating the exact same topology, you can simply return "True".
-    If they will be creating different topology, like some of the resources are missing,
-    you will need to return "False".
-    You will need to return the reason for the difference. Using the following format:
+    Ignore:
+    - Comments, whitespace, purely cosmetic naming or formatting differences that do not change behavior.
 
-    '''
-    1. Expected topology resource: <expected_topology_resource_context>
-    Actual topology resource: <actual_topology_resource_context>
-    Reason: These two topology resources are different.
-    2. Expected topology resource: <expected_topology_resource_context>
-    Actual topology resource: None
-    Reason: The actual topology resource is missing.
-    3. Expected topology resource: <expected_topology_resource_context>
-    Actual topology resource: <actual_topology_resource_context>
-    Reason: <reason>
-    ...
-    '''
+    Compare precisely:
+    1) Resource count and types.
+    2) Provider/region/account if they affect behavior.
+    3) Arguments/attributes and resolved values (including defaults).
+    4) Relationships/dependencies and module composition when expanded.
+
+    Output format (strict):
+    - Differences: A numbered list. For each item, show “Expected: … / Actual: … / Reason: …”.
+    - If no differences: say “No meaningful differences found.”
+    - Last line must be the verdict in the exact format:
+      Overall Verdict: True | False | Error
+
+    Verdict rules:
+    - True: Functionally equivalent topology.
+    - False: Behavior-affecting differences exist (missing resources, diverging attributes that change behavior, different relationships).
+    - Error: Context is insufficient or unparsable (explain which inputs are missing).
+    - Keep the whole response ≤ 600 tokens.
     """
 
     # Build full paths
@@ -285,7 +302,7 @@ async def terraform_coverage_validation(
         {actual_topology_context}
         End of the actual topology context.
 
-        Please validate if these two Terraform topology are the same.
+        Please validate if these two Terraform topologies are the same. Remember to end with 'Overall Verdict: ...' exactly once.
         """
 
         openai_client = ctx.request_context.lifespan_context.openai_client
@@ -296,7 +313,7 @@ async def terraform_coverage_validation(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question_prompt},
             ],
-            temperature=0.3,
+            temperature=0.1,
         )
 
         # Prepare the analysis result
@@ -310,10 +327,21 @@ async def terraform_coverage_validation(
 
         # Determine validation result based on analysis
         validation_result = "True"
-        if "False" in analysis_result or "different" in analysis_result.lower():
-            validation_result = "False"
-        elif "error" in analysis_result.lower() or "No response" in analysis_result:
-            validation_result = "Error"
+        last_line = (
+            analysis_result.strip().splitlines()[-1] if analysis_result.strip() else ""
+        )
+        if last_line.startswith("Overall Verdict:"):
+            verdict_value = last_line.split(":", 1)[1].strip()
+            if verdict_value in {"True", "False", "Error"}:
+                validation_result = verdict_value
+            else:
+                validation_result = "Error"
+        else:
+            # Fallback to keyword heuristic
+            if "False" in analysis_result or "different" in analysis_result.lower():
+                validation_result = "False"
+            elif "error" in analysis_result.lower() or "No response" in analysis_result:
+                validation_result = "Error"
 
         # Create structured response
         result = {
@@ -370,39 +398,32 @@ async def python_coverage_validation(
     """
 
     system_prompt = """
-    You are a helpful Python testing expert with expertise in network testing.
-    You will be given two Python test implementations, one is the expected test logic,
-    and the other is the actual test logic.
-    You will need to validate the actual test logic against the expected test logic.
+    You are a deterministic Python test logic comparator (network testing domain).
 
-    Focus on comparing:
-    1. The total number of test cases
-    2. Test structure and flow
-    3. Test assertions and validations
-    4. Test setup and teardown logic
-    5. Key test scenarios and edge cases
-    6. Test data and configurations
+    Task:
+    - Compare expected vs actual test implementations for logic coverage equivalence.
 
-    If they have exact same or equivalent test logic, you can simply return "True".
-    If they have similar test logic, but some implementation details are different,
-    you will need to return "Ok".
-    If they have different test logic, like some test cases are missing,
-    you will need to return "False".
-    You will need to return the reason for the difference for "False" or "Ok" cases
-    using the following format:
+    Ignore:
+    - Comments, formatting, non-functional refactors (variable renames that do not change behavior).
 
-    '''
-    1. Expected test logic: <expected_test_logic_context>
-    Actual test logic: <actual_test_logic_context>
-    Reason: These two test logic implementations are different.
-    2. Expected test logic: <expected_test_logic_context>
-    Actual test logic: None
-    Reason: The actual test logic is missing this test case.
-    3. Expected test logic: <expected_test_logic_context>
-    Actual test logic: <actual_test_logic_context>
-    Reason: <reason>
-    ...
-    '''
+    Compare precisely:
+    1) Number of test cases and parametrizations.
+    2) Test flow (setup/teardown, fixtures, ordering when order affects behavior).
+    3) Assertions and validation semantics (thresholds, conditions, exception checks).
+    4) Key scenarios/edge cases and test data semantics.
+
+    Output format (strict):
+    - Differences: A numbered list. For each item, show “Expected: … / Actual: … / Reason: …”.
+    - If logically equivalent: say “No meaningful differences found.”
+    - Last line must be the verdict in the exact format:
+      Overall Verdict: True | Ok | False | Error
+
+    Verdict rules:
+    - True: Logically equivalent (may differ in style/refactor but same behavior and coverage).
+    - Ok: Semantically close with minor differences that shouldn’t materially reduce coverage. Provide 1–3 reasons.
+    - False: Missing cases, weaker assertions, or changed behavior/material coverage gaps. Provide concrete missing items.
+    - Error: Context insufficient or unparsable (state what is missing).
+    - Keep the whole response ≤ 600 tokens.
     """
     # Build full paths
     regression_full_path = Path(REGRESSION_PATH) / test_path_under_regression
@@ -430,8 +451,7 @@ async def python_coverage_validation(
         {actual_test_context}
         End of the actual test logic context.
 
-        Please validate if these two Python test implementations have the same test logic.
-        Focus on test structure, assertions, test cases, and overall testing approach.
+        Please validate if these two Python test implementations have the same test logic. Remember to end with 'Overall Verdict: ...' exactly once.
         """
 
         openai_client = ctx.request_context.lifespan_context.openai_client
@@ -442,7 +462,7 @@ async def python_coverage_validation(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question_prompt},
             ],
-            temperature=0.3,
+            temperature=0.1,
         )
 
         # Prepare the analysis result
@@ -456,12 +476,23 @@ async def python_coverage_validation(
 
         # Determine validation result based on analysis
         validation_result = "True"
-        if "False" in analysis_result:
-            validation_result = "False"
-        elif "Ok" in analysis_result or "similar" in analysis_result.lower():
-            validation_result = "Ok"
-        elif "error" in analysis_result.lower() or "No response" in analysis_result:
-            validation_result = "Error"
+        last_line = (
+            analysis_result.strip().splitlines()[-1] if analysis_result.strip() else ""
+        )
+        if last_line.startswith("Overall Verdict:"):
+            verdict_value = last_line.split(":", 1)[1].strip()
+            if verdict_value in {"True", "Ok", "False", "Error"}:
+                validation_result = verdict_value
+            else:
+                validation_result = "Error"
+        else:
+            # Fallback to keyword heuristic
+            if "False" in analysis_result:
+                validation_result = "False"
+            elif "Ok" in analysis_result or "similar" in analysis_result.lower():
+                validation_result = "Ok"
+            elif "error" in analysis_result.lower() or "No response" in analysis_result:
+                validation_result = "Error"
 
         # Create structured response
         result = {
@@ -498,6 +529,7 @@ async def prepare_terraform_syntax_validation(
     """
     Use this tool to prepare the testing environment for the input test suite Terraform topology,
     and get validation command to execute and where to run the command.
+    Terraform credentials file is provided by the test framework already and should not be modified.
     Please run the command in the given directory. And verify the result.
 
     Args:
@@ -566,6 +598,7 @@ async def prepare_entire_test_syntax_validation(
     """
     Use this tool to prepare the testing environment for the input test suite,
     and get execution command to execute and where to run the command.
+    Terraform credentials file is provided by the test framework already and should not be modified.
     Please run the command in the given directory. And verify the result.
 
     Args:
@@ -630,6 +663,9 @@ async def prepare_entire_test_syntax_validation(
 
     await ctx.info(f"Test environment prepared for: {test_suite_name}")
     return json.dumps(result, indent=2)
+
+
+# (auto_validation_flow tool removed; logic captured in SYSTEM_PROMPT protocol)
 
 
 async def main():
