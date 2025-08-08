@@ -234,11 +234,17 @@ async def terraform_coverage_validation(
     This tool is used to validate the Terraform topology coverage for the input test suite.
     It compares the testbed topology using all .tf files from both regression and cloudn paths
     and evaluate if the migrated e2e test topology is the same as the original regression
-    test topology.
+    test topology. If validation result is False, you need to check the analysis and fix the
+    issue if the analysis is valid.
 
     Args:
-        test_path_under_regression: A relative path relative to the regression directory to the expected topology
-        test_path_under_cloudn: A relative path relative to the cloudn directory to the actual topology
+        test_path_under_regression: Relative path under `REGRESSION_PATH` to the test suite ROOT directory (NOT including `testbed/topology`).
+            - What to pass: the test suite folder path. The tool will append `/testbed/topology` automatically.
+            - Example (correct): `autotest/end2end/nat/arm_single_ip_snat`
+            - Example (common but wrong): `autotest/end2end/nat/arm_single_ip_snat/testbed/topology` (will cause "no .tf files found" unless normalized)
+        test_path_under_cloudn: Relative path under `CLOUDN_PATH` to the directory that contains the actual Terraform `.tf` files to compare.
+            - What to pass: the Cloudn topology/module directory that directly contains `.tf` files.
+            - Example: `test-scripts/end-to-end/vendor/nat/arm_single_ip_snat`
 
     Returns:
         JSON string containing validation result with structure:
@@ -416,11 +422,14 @@ async def python_coverage_validation(
     This tool is used to compare the Python test logic coverage for the input test suite.
     It compares the test logic using all .py files from both regression and cloudn paths
     and evaluate if the migrated e2e test logic is the same as the original regression
-    test logic.
+    test logic. If validation result is False, you need to check the analysis and fix the
+    issue if the analysis is valid.
 
     Args:
-        test_path_under_regression: A relative path relative to the regression directory to the expected test logic
-        test_path_under_cloudn: A relative path relative to the cloudn directory to the actual test logic
+        test_path_under_regression: Relative path under `REGRESSION_PATH` to the Python test files directory (expected logic).
+            - Example: `autotest/end2end/nat/arm_single_ip_snat/tests`
+        test_path_under_cloudn: Relative path under `CLOUDN_PATH` to the migrated Python test files directory (actual logic).
+            - Example: `test-scripts/end-to-end/tests/nat/arm_single_ip_snat`
 
     Returns:
         JSON string containing validation result with structure:
