@@ -298,6 +298,37 @@ async def terraform_coverage_validation(
         logger.info("Expected terraform files %s", expected_files)
         logger.info("Actual terraform files %s", actual_files)
 
+        # Early validation: ensure files exist at both paths
+        if not expected_files:
+            return json.dumps(
+                {
+                    "validation_result": "Error",
+                    "analysis": "",
+                    "expected_topology_path": str(regression_full_path),
+                    "actual_topology_path": str(cloudn_full_path),
+                    "error": (
+                        "No .tf files found under the expected topology path. "
+                        "Please provide a correct test_path_under_regression (relative to REGRESSION_PATH)."
+                    ),
+                },
+                indent=2,
+            )
+
+        if not actual_files:
+            return json.dumps(
+                {
+                    "validation_result": "Error",
+                    "analysis": "",
+                    "expected_topology_path": str(regression_full_path),
+                    "actual_topology_path": str(cloudn_full_path),
+                    "error": (
+                        "No .tf files found under the actual topology path. "
+                        "Please provide a correct test_path_under_cloudn (relative to CLOUDN_PATH)."
+                    ),
+                },
+                indent=2,
+            )
+
         question_prompt = f"""
         Start of the expected topology context:
         {expected_topology_context}
