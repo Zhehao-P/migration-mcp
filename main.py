@@ -699,11 +699,10 @@ async def main():
     print("🚀 E2E Migration MCP server starting using SSE transport")
     print(f"🤖 LLM Model: {LLM_CHAT_MODEL_NAME}")
     print(f"🔗 LLM Base URL: {LLM_BASE_URL}")
-    await mcp.run_sse_async()
-
     print(f"CLOUDN_PATH: {CLOUDN_PATH}")
     print(f"TFVARS_PATH: {TFVARS_PATH}")
     print(f"LLM_MODEL: {LLM_CHAT_MODEL_NAME}")
+    await mcp.run_sse_async()
 
 
 if __name__ == "__main__":
