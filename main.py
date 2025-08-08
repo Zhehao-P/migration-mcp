@@ -34,18 +34,19 @@ BASE_DIR = Path(__file__).parent
 
 
 SYSTEM_PROMPT = """
-You are an E2E validation MCP agent for running tests and providing execution output.
-
-Your job is to:
-- Always call the resource "config://settings" to retrieve project structure context.
-- Execute specific tests safely in a controlled environment
-- Return complete execution output including stdout and stderr
-- Help with end-to-end testing validation
+This MCP server is used to validate the E2E test suite.
+It provides resources to help you understand the repository structure and the test framework.
+It also provides tools to validate the Terraform topology coverage and Python test logic coverage.
+After both coverage validation results are acceptable, please use the tool to run the entire
+test suite on the backend for full test suite validation.
 
 IMPORTANT:
-- Tests are executed in a controlled environment
-- Always validate test names before execution
-- Return all execution output for analysis
+- Always check the context here when you need more context about the migration task.
+- Always use both coverage validation tools  to verify the change doesn't reduce the test coverage.
+- Always use the entire_test_validation tool to run the entire test suite on the backend for full test suite validation.
+
+If the entire_test_validation has been used, and no issues are found, you can claim the
+test suite migration is complete.
 """
 
 CLOUDN_E2E_FRAMEWORK_PROMPT = """
@@ -229,7 +230,14 @@ async def terraform_coverage_validation(
     You will be given two Terraform topology, one is the expected topology,
     and the other is the actual topology.
     You will need to validate the actual topology against the expected topology.
-    If they will be creating similar or exact same topology, you can simply return "True".
+
+    Please focus on the following aspects:
+    1. The number of resources in the topology
+    2. The type of resources in the topology
+    3. The configuration of the resources in the topology
+    4. The relationship between the resources in the topology
+
+    If they will be creating the exact same topology, you can simply return "True".
     If they will be creating different topology, like some of the resources are missing,
     you will need to return "False".
     You will need to return the reason for the difference. Using the following format:
@@ -325,7 +333,8 @@ async def terraform_coverage_validation(
             "error": (
                 f"Error validating Terraform topology: {str(e)}. "
                 + "Please check if the test path is correct. "
-                + f"Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct."
+                + f"Regression path {regression_full_path} "
+                + f"or cloudn path {cloudn_full_path} is not correct."
             ),
         }
         return json.dumps(error_result, indent=2)
@@ -365,11 +374,12 @@ async def python_coverage_validation(
     You will need to validate the actual test logic against the expected test logic.
 
     Focus on comparing:
-    1. Test structure and flow
-    2. Test assertions and validations
-    3. Test setup and teardown logic
-    4. Key test scenarios and edge cases
-    5. Test data and configurations
+    1. The total number of test cases
+    2. Test structure and flow
+    3. Test assertions and validations
+    4. Test setup and teardown logic
+    5. Key test scenarios and edge cases
+    6. Test data and configurations
 
     If they have exact same or equivalent test logic, you can simply return "True".
     If they have similar test logic, but some implementation details are different,
@@ -471,7 +481,8 @@ async def python_coverage_validation(
             "error": (
                 f"Error validating Python test logic: {str(e)}. "
                 + "Please check if the test path is correct. "
-                + f"Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct."
+                + f"Regression path {regression_full_path} "
+                + f"or cloudn path {cloudn_full_path} is not correct."
             ),
         }
         return json.dumps(error_result, indent=2)
@@ -485,14 +496,22 @@ async def prepare_terraform_syntax_validation(
     """
     Please use this tool for validation of the input test suite Terraform topology syntax.
     This tool is used to prepare running environment for the input test suite Terraform topology.
-    It prepares the test execution directory and copies the framework provided provider credential file.
-    Returns the command to trigger the Terraform topology apply, and where to run the command.
+    It prepares the test execution environment and provides the instruction to validate the
+    Terraform topology syntax.
 
     Args:
         test_suite_name: The name of the test suite to execute
 
     Returns:
-        string containing test execution information
+        JSON string containing test execution information with structure and field meanings:
+
+        Structure:
+        {
+          "execution_path": Directory where you should run the command,
+          "execution_command": The exact command to run for Terraform syntax validation,
+          "notes": Additional guidance or caveats for running the test,
+          "error": Error message if preparation failed.
+        }
     """
 
     test_execution_dir = ctx.request_context.lifespan_context.test_execution_dir
@@ -515,26 +534,27 @@ async def prepare_terraform_syntax_validation(
         )
         await ctx.info(f"Credential file copied for test: {test_suite_name}")
     except subprocess.CalledProcessError as e:
-        return f"Error copying credential file: {e.stderr or str(e)}"
+        error_result: dict[str, str] = {
+            "error": f"Error copying credential file: {e.stderr or str(e)}",
+        }
+        return json.dumps(error_result, indent=2)
 
-    # Prepare response with execution information
-    response = (
-        f"Test environment prepared successfully!\n\n"
-        f"📋 Test Suite: {test_suite_name}\n"
-        f"🎯 Test Directory: {test_dir}\n"
-        f"📄 Credential File: {TFVARS_FILE_NAME} (already copied to test directory)\n\n"
-        f"🎯 Run command under path: {test_dir}\n"
-        f"🚀 Command to run tests:\n"
-        f"{run_command}\n\n"
-        f"📝 Note: {TFVARS_FILE_NAME} is a provider credential file.\n"
-        f"It will be provided by the test framework and should not be modified.\n"
-        f"If needed, update Terraform variables name in the test script to match the provider credential file.\n\n"
-    )
+    # Prepare response with execution information in JSON format
+    result: dict[str, str] = {
+        "execution_path": str(test_dir),
+        "execution_command": run_command,
+        "notes": (
+            f"{TFVARS_FILE_NAME} is a provider credential file "
+            + "provided by the test framework and should not be modified."
+            + "If needed, update Terraform variable names in the test "
+            + "script to match the provider credential file."
+        ),
+    }
 
     await ctx.info(
         f"Terraform topology validation environment prepared for: {test_suite_name}"
     )
-    return response
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool(name="entire_test_validation_preparation")
@@ -551,14 +571,27 @@ async def prepare_entire_test_syntax_validation(
     Args:
         test_suite_name: The name of the test suite to execute
     Returns:
-        string containing test execution information
+        JSON string containing test execution information with structure and field meanings:
+
+        Structure:
+        {
+            "execution_path": Directory where you should run the command,
+            "execution_command": The exact command to run for the full test run,
+            "logs_directory": Directory where complete test execution logs will be written,
+            "report_path": Path to the generated HTML report for the full test run,
+            "notes": Additional guidance or caveats for running the test,
+            "error": Error message if preparation failed.
+        }
     """
     test_execution_dir = ctx.request_context.lifespan_context.test_execution_dir
     log_dir = ctx.request_context.lifespan_context.log_dir
 
     # Validate inputs
     if not test_suite_name or not test_suite_name.strip():
-        return "Error: Test name cannot be empty"
+        input_error: dict[str, str] = {
+            "error": "Test name cannot be empty",
+        }
+        return json.dumps(input_error, indent=2)
 
     # Set working directory
     relative_test_dir = f"tests/{test_suite_name}"
@@ -576,26 +609,27 @@ async def prepare_entire_test_syntax_validation(
         )
         await ctx.info(f"Credential file copied for test: {test_suite_name}")
     except subprocess.CalledProcessError as e:
-        return f"Error copying credential file: {e.stderr or str(e)}"
+        copy_error: dict[str, str] = {
+            "error": f"Error copying credential file: {e.stderr or str(e)}",
+        }
+        return json.dumps(copy_error, indent=2)
 
-    # Prepare response with execution information
-    response = (
-        f"Test environment prepared successfully!\n\n"
-        f"📋 Test Suite: {test_suite_name}\n"
-        f"🎯 Test Directory: {test_dir}\n"
-        f"📄 Credential File: {TFVARS_FILE_NAME} (already copied to test directory)\n\n"
-        f"🎯 Run command under path: {test_execution_dir}\n"
-        f"🚀 Command to run tests:\n"
-        f"{run_command}\n\n"
-        f"📝 Note: {TFVARS_FILE_NAME} is a provider credential file.\n"
-        f"It will be provided by the test framework and should not be modified.\n"
-        f"If needed, update Terraform variables name in the test script to match the provider credential file.\n\n"
-        f"📊 Complete test execution log will be saved in the following directory: {log_dir}\n"
-        f"📈 Test execution report will be saved in the following path: {test_execution_dir / 'report.html'}"
-    )
+    # Prepare response with execution information in JSON format
+    result: dict[str, str] = {
+        "execution_path": str(test_dir),
+        "execution_command": run_command,
+        "logs_directory": str(log_dir),
+        "report_path": str(test_execution_dir / "report.html"),
+        "notes": (
+            f"{TFVARS_FILE_NAME} is a provider credential file "
+            + "provided by the test framework and should not be modified."
+            + "If needed, update Terraform variable names in the test "
+            + "script to match the provider credential file."
+        ),
+    }
 
     await ctx.info(f"Test environment prepared for: {test_suite_name}")
-    return response
+    return json.dumps(result, indent=2)
 
 
 async def main():
