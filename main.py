@@ -176,11 +176,12 @@ mcp = FastMCP(
 )
 
 
-@mcp.resource("config://settings")
-async def get_important_settings() -> str:
+@mcp.resource("context")
+async def get_context() -> str:
     """
-    Please get important settings and necessary information here for the E2E Migration MCP server.
-    You will understand the folder structure and how the e2e test framework works.
+    Always check the context here when you need more context about the migration task.
+    This resource provides important settings and necessary information for the E2E
+    test suite migration task and this MCP server.
     """
 
     response = (
@@ -216,9 +217,7 @@ async def terraform_coverage_validation(
             "validation_result": "True" | "False" | "Error",
             "analysis": "Detailed analysis from LLM",
             "expected_topology_path": "full path to expected topology",
-            "expected_topology_files": ["list of .tf files read"],
             "actual_topology_path": "full path to actual topology",
-            "actual_topology_files": ["list of .tf files read"],
             "error": "Error message if validation failed" | null
         }
     """
@@ -261,6 +260,9 @@ async def terraform_coverage_validation(
         actual_topology_context, actual_files = read_files_with_extension(
             cloudn_full_path, "tf"
         )
+
+        logger.info("Expected terraform files %s", expected_files)
+        logger.info("Actual terraform files %s", actual_files)
 
         question_prompt = f"""
         Start of the expected topology context:
@@ -306,9 +308,7 @@ async def terraform_coverage_validation(
             "validation_result": validation_result,
             "analysis": analysis_result,
             "expected_topology_path": str(regression_full_path),
-            "expected_topology_files": expected_files,
             "actual_topology_path": str(cloudn_full_path),
-            "actual_topology_files": actual_files,
             "error": None,
         }
 
@@ -319,9 +319,7 @@ async def terraform_coverage_validation(
             "validation_result": "Error",
             "analysis": "",
             "expected_topology_path": str(regression_full_path),
-            "expected_topology_files": [],
             "actual_topology_path": str(cloudn_full_path),
-            "actual_topology_files": [],
             "error": f"Error validating Terraform topology: {str(e)}. Please check if the test path is correct. Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct.",
         }
         return json.dumps(error_result, indent=2)
@@ -347,9 +345,7 @@ async def python_coverage_validation(
             "validation_result": "True" | "Ok" | "False" | "Error",
             "analysis": "Detailed analysis from LLM",
             "expected_test_logic_path": "full path to expected test logic",
-            "expected_test_logic_files": ["list of .py files read"],
             "actual_test_logic_path": "full path to actual test logic",
-            "actual_test_logic_files": ["list of .py files read"],
             "error": "Error message if validation failed" | null
         }
     """
@@ -402,6 +398,9 @@ async def python_coverage_validation(
             cloudn_full_path, "py"
         )
 
+        logger.info("Expected python files %s", expected_files)
+        logger.info("Actual python files %s", actual_files)
+
         question_prompt = f"""
         Start of the expected test logic context:
         {expected_test_context}
@@ -449,9 +448,7 @@ async def python_coverage_validation(
             "validation_result": validation_result,
             "analysis": analysis_result,
             "expected_test_logic_path": str(regression_full_path),
-            "expected_test_logic_files": expected_files,
             "actual_test_logic_path": str(cloudn_full_path),
-            "actual_test_logic_files": actual_files,
             "error": None,
         }
 
@@ -462,9 +459,7 @@ async def python_coverage_validation(
             "validation_result": "Error",
             "analysis": "",
             "expected_test_logic_path": str(regression_full_path),
-            "expected_test_logic_files": [],
             "actual_test_logic_path": str(cloudn_full_path),
-            "actual_test_logic_files": [],
             "error": f"Error validating Python test logic: {str(e)}. Please check if the test path is correct. Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct.",
         }
         return json.dumps(error_result, indent=2)
