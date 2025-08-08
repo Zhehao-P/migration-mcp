@@ -180,11 +180,11 @@ mcp = FastMCP(
 )
 
 
-@mcp.resource("resource://context")
+@mcp.tool(name="get_context")
 async def get_context() -> str:
     """
-    Always check the context here when you need more context about the migration task.
-    This resource provides important settings and necessary information for the E2E
+    This tool is used to get the context about the migration task.
+    It provides important settings and necessary information for the E2E
     test suite migration task and this MCP server.
     """
 
