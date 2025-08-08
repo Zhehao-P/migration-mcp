@@ -180,7 +180,7 @@ mcp = FastMCP(
 )
 
 
-@mcp.resource("context")
+@mcp.resource("resource://context")
 async def get_context() -> str:
     """
     Always check the context here when you need more context about the migration task.
