@@ -36,16 +36,19 @@ BASE_DIR = Path(__file__).parent
 SYSTEM_PROMPT = """
 This MCP server is used to validate the E2E test suite.
 It provides resources to help you understand the repository structure and the test framework.
-It also provides tools to validate the Terraform topology coverage and Python test logic coverage.
-After both coverage validation results are acceptable, please use the tool to run the entire
-test suite on the backend for full test suite validation.
+It also provides tools to validate both Terraform topology and python test logic coverage
+and syntax.
+Please use the tools to validate the migration work you have done, and fix all issues found.
 
 IMPORTANT:
-- Always check the context here when you need more context about the migration task.
-- Always use both coverage validation tools  to verify the change doesn't reduce the test coverage.
-- Always use the entire_test_validation tool to run the entire test suite on the backend for full test suite validation.
+- Check the context here when you need more context about the migration task.
+- Fix all issues found when using the validation tools.
+- Use both coverage validation tools again when any changes are made to the test suite.
+- Always run the syntax validation tools command in the given directory.
+- Terraform syntax validation should be used after both coverage validation results are acceptable.
+- Python syntax validation should be used after Terraform syntax validation hits not issue.
 
-If the entire_test_validation has been used, and no issues are found, you can claim the
+If python syntax validation is run, and both report and logs show no error you can claim the
 test suite migration is complete.
 """
 
@@ -494,10 +497,9 @@ async def prepare_terraform_syntax_validation(
     test_suite_name: str,
 ) -> str:
     """
-    Please use this tool for validation of the input test suite Terraform topology syntax.
-    This tool is used to prepare running environment for the input test suite Terraform topology.
-    It prepares the test execution environment and provides the instruction to validate the
-    Terraform topology syntax.
+    Use this tool to prepare the testing environment for the input test suite Terraform topology,
+    and get validation command to execute and where to run the command.
+    Please run the command in the given directory. And verify the result.
 
     Args:
         test_suite_name: The name of the test suite to execute
@@ -507,10 +509,10 @@ async def prepare_terraform_syntax_validation(
 
         Structure:
         {
-          "execution_path": Directory where you should run the command,
-          "execution_command": The exact command to run for Terraform syntax validation,
-          "notes": Additional guidance or caveats for running the test,
-          "error": Error message if preparation failed.
+            "execution_path": Directory where you should run the command,
+            "execution_command": The exact command to run for Terraform syntax validation,
+            "notes": Additional guidance or caveats for running the test,
+            "error": Error message if preparation failed.
         }
     """
 
@@ -563,10 +565,9 @@ async def prepare_entire_test_syntax_validation(
     test_suite_name: str,
 ) -> str:
     """
-    Please use this tool for validation of the input test suite syntax.
-    This tool is used to prepare running environment for the input test suite.
-    It prepares the test execution directory and copies the framework provided provider credential file.
-    Returns the command to trigger the full test run, and where to run the command.
+    Use this tool to prepare the testing environment for the input test suite,
+    and get execution command to execute and where to run the command.
+    Please run the command in the given directory. And verify the result.
 
     Args:
         test_suite_name: The name of the test suite to execute
@@ -599,7 +600,7 @@ async def prepare_entire_test_syntax_validation(
 
     # Prepare commands
     cp_command = f"cp {TFVARS_PATH} {test_dir}/{TFVARS_FILE_NAME}"
-    run_command = f"uv run pytest {relative_test_dir} -sv --log-cli-level=INFO"
+    run_command = f"export AVX_NODESTROY=1 && uv run pytest {relative_test_dir} -sv --log-cli-level=INFO"
 
     # Execute credential file copy command
     try:
