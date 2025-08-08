@@ -49,16 +49,21 @@ Post-change protocol (run this after EVERY code change):
    - If verdict != True: STOP and output a numbered Differences list with concrete fixes.
 2) Terraform syntax
    - If Terraform coverage is True: call prepare_terraform_syntax_validation(test_suite_name).
-   - Present execution_path and execution_command. Run in that directory.
-   - If syntax errors appear in logs/output: STOP and report them.
+   - Present execution_path and execution_command. You MUST execute the command in that exact directory:
+     cd "<execution_path>" && <execution_command>
+   - Capture stdout/stderr and exit code. Treat any non-zero exit code or lines containing "Error:" (Terraform) as failure.
+   - Summarize key errors (2-5 lines) and provide actionable fixes.
+   - If you cannot run commands in this environment, instruct the operator to run the exact command above and paste back the output for your analysis.
 3) Python coverage
    - Only after Terraform coverage and syntax are OK: call python_coverage_validation.
    - Parse the last line: "Overall Verdict: True | Ok | False | Error".
    - If verdict in {False, Error}: STOP and output a numbered Differences list with concrete fixes.
 4) Python syntax
    - If Python coverage is True or Ok: call entire_test_validation_preparation(test_suite_name).
-   - Present execution_path and execution_command. Run in that directory.
-   - If syntax errors appear in logs/output: STOP and report them.
+   - Present execution_path and execution_command. You MUST execute the command in that exact directory:
+     cd "<execution_path>" && <execution_command>
+   - Capture stdout/stderr and exit code. For pytest, treat any failures/errors or non-zero exit as failure; report the failing tests summary and first error trace succinctly.
+   - If you cannot run commands in this environment, instruct the operator to run the exact command above and paste back the output for your analysis.
 
 Rules:
 - Be precise, deterministic, and concise. Prefer bullet points over long prose.
