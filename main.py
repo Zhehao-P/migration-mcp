@@ -205,7 +205,9 @@ async def terraform_coverage_validation(
 ) -> str:
     """
     This tool is used to validate the Terraform topology coverage for the input test suite.
-    It reads all .tf files from both paths and compares their Terraform configurations.
+    It compares the testbed topology using all .tf files from both regression and cloudn paths
+    and evaluate if the migrated e2e test topology is the same as the original regression
+    test topology.
 
     Args:
         test_path_under_regression: A relative path relative to the regression directory to the expected topology
@@ -320,7 +322,11 @@ async def terraform_coverage_validation(
             "analysis": "",
             "expected_topology_path": str(regression_full_path),
             "actual_topology_path": str(cloudn_full_path),
-            "error": f"Error validating Terraform topology: {str(e)}. Please check if the test path is correct. Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct.",
+            "error": (
+                f"Error validating Terraform topology: {str(e)}. "
+                + "Please check if the test path is correct. "
+                + f"Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct."
+            ),
         }
         return json.dumps(error_result, indent=2)
 
@@ -333,7 +339,9 @@ async def python_coverage_validation(
 ) -> str:
     """
     This tool is used to compare the Python test logic coverage for the input test suite.
-    It reads all .py files from both paths and compares their test implementations.
+    It compares the test logic using all .py files from both regression and cloudn paths
+    and evaluate if the migrated e2e test logic is the same as the original regression
+    test logic.
 
     Args:
         test_path_under_regression: A relative path relative to the regression directory to the expected test logic
@@ -460,7 +468,11 @@ async def python_coverage_validation(
             "analysis": "",
             "expected_test_logic_path": str(regression_full_path),
             "actual_test_logic_path": str(cloudn_full_path),
-            "error": f"Error validating Python test logic: {str(e)}. Please check if the test path is correct. Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct.",
+            "error": (
+                f"Error validating Python test logic: {str(e)}. "
+                + "Please check if the test path is correct. "
+                + f"Regression path {regression_full_path} or cloudn path {cloudn_full_path} is not correct."
+            ),
         }
         return json.dumps(error_result, indent=2)
 
