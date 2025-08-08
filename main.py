@@ -41,12 +41,11 @@ and syntax.
 Please use the tools to validate the migration work you have done, and fix all issues found.
 
 IMPORTANT:
-- Check the context here when you need more context about the migration task.
-- Fix all issues found when using the validation tools.
-- Use both coverage validation tools again when any changes are made to the test suite.
+- Always check the context here when you need more context about the migration task.
+- Always use both coverage validation tools again when any changes are made to the test suite.
+- Always use Terraform syntax validation after both coverage validation results are acceptable.
+- Always use Python syntax validation at very end when all other tools hit no issue.
 - Always run the syntax validation tools command in the given directory.
-- Terraform syntax validation should be used after both coverage validation results are acceptable.
-- Python syntax validation should be used after Terraform syntax validation hits not issue.
 
 If python syntax validation is run, and both report and logs show no error you can claim the
 test suite migration is complete.
