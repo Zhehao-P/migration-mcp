@@ -3,12 +3,13 @@ name = "e2e-validation-mcp"
 version = "0.1.0"
 description = "MCP server for running commands and E2E validation"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.12.*"
 dependencies = [
     "black>=25.1.0",
     "mcp[cli]>=1.3.0",
     "python-dotenv>=1.0.0",
     "openai>=1.0.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [tool.setuptools]
@@ -16,5 +17,5 @@ py-modules = ["main"]
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = ['py312']
 include = '\.pyi?$'

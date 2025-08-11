@@ -13,10 +13,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+
 from asyncio.log import logger
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 from openai import AsyncOpenAI
+import aiosqlite
 
 load_dotenv()
 CLOUDN_PATH: str = os.getenv("CLOUDN_PATH", "")
@@ -28,6 +30,9 @@ TFVARS_FILE_NAME = "provider_cred.tfvars"
 LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
 LLM_CHAT_MODEL_NAME: str = os.getenv("LLM_CHAT_MODEL_NAME", "gpt-3.5-turbo")
+
+# Data Configuration
+DATA_PATH: str = os.getenv("DATA_PATH", "./data")
 
 # Base directory
 BASE_DIR = Path(__file__).parent
@@ -128,6 +133,66 @@ def read_files_with_extension(
     return file_context, files_read
 
 
+class SQLiteService:
+    """Simplified SQLite service for storing test folder names and paths"""
+
+    def __init__(self, data_path: str):
+        self.data_path = Path(data_path)
+        self.db_path = self.data_path / "mcp_database.db"
+
+    async def initialize(self) -> None:
+        """Initialize the SQLite database"""
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        logger.info("📁 Database directory created at: %s", self.data_path)
+        async with aiosqlite.connect(str(self.db_path)) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS test_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    test_folder_name TEXT UNIQUE NOT NULL,
+                    regression_path TEXT NOT NULL,
+                    cloudn_path TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            )
+            await db.commit()
+        logger.info("🗄️  SQLite database initialized at: %s", self.db_path)
+
+    async def add_entry(
+        self, test_folder_name: str, regression_path: str, cloudn_path: str
+    ) -> None:
+        """Add an entry to the SQLite database"""
+        async with aiosqlite.connect(str(self.db_path)) as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO test_data (test_folder_name, regression_path, cloudn_path, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+                (test_folder_name, regression_path, cloudn_path),
+            )
+            await db.commit()
+
+    async def get_entry(self, test_folder_name: str) -> dict[str, str] | None:
+        """Get an entry from the SQLite database"""
+        async with aiosqlite.connect(str(self.db_path)) as db:
+            test_data = await db.execute(
+                "SELECT regression_path, cloudn_path FROM test_data WHERE test_folder_name = ?",
+                (test_folder_name,),
+            )
+            row = await test_data.fetchone()
+            if row:
+                # Create full paths
+                full_regression_path = str(Path(REGRESSION_PATH) / row[0])
+                full_cloudn_path = str(Path(CLOUDN_PATH) / row[1])
+                return {
+                    "regression_path": full_regression_path,
+                    "cloudn_path": full_cloudn_path,
+                }
+            return None
+
+
 @dataclass
 class MCPContext:
     """Context for managing test execution."""
@@ -135,6 +200,7 @@ class MCPContext:
     test_execution_dir: Path
     log_dir: Path
     openai_client: AsyncOpenAI
+    db_service: SQLiteService
 
 
 async def test_openai_client_ready(client: AsyncOpenAI) -> None:
@@ -182,11 +248,16 @@ async def mcp_lifespan(server: FastMCP) -> AsyncIterator[MCPContext]:
     # Test OpenAI client connectivity
     await test_openai_client_ready(openai_client)
 
+    # Initialize SQLite service
+    db_service = SQLiteService(DATA_PATH)
+    await db_service.initialize()
+
     try:
         yield MCPContext(
             test_execution_dir=test_execution_dir,
             log_dir=log_dir,
             openai_client=openai_client,
+            db_service=db_service,
         )
     finally:
         logger.info("Cleanup TestContext")
@@ -204,14 +275,32 @@ mcp = FastMCP(
 
 
 @mcp.tool(name="get_context")
-async def get_context() -> str:
+async def get_context(ctx: Context, test_path_under_regression: str) -> str:
     """
     This tool is used to get the context about the migration task.
     It provides important settings and necessary information for the E2E
     test suite migration task and this MCP server.
+
+    Args:
+        test_path_under_regression: Relative path under regression folder to the test suite folder.
+            - What to pass: the test suite folder path
+            - Example (correct): `autotest/end2end/nat/arm_single_ip_snat`
+
+    Returns:
+        A string containing the context about the migration task.
     """
 
+    test_name = test_path_under_regression.split("/")[-1]
+    cloudn_test_path = f"test-scripts/end-to-end/tests/{test_name}"
+    db_service = ctx.request_context.lifespan_context.db_service
+
+    await db_service.add_entry(test_name, test_path_under_regression, cloudn_test_path)
+    logger.info("Added entry to SQLite database: %s", test_name)
+
     response = (
+        "Please read the following information carefully and use it to guide your work.\n"
+        f"Please placed the migrated test suite under the '{cloudn_test_path}' in Cloudn.\n"
+        f"Use the test suite name '{test_name}' as test_name parameter when using MCP tools.\n"
         f"Regression test directory path: {REGRESSION_PATH}\n"
         f"Regression libraries path: {REGRESSION_PATH}/avxt/lib/, {REGRESSION_PATH}/autotest/lib/api_pages/\n"
         f"Regression Terraform module path: {REGRESSION_PATH}/avxt/terraform/\n"
@@ -710,9 +799,6 @@ async def prepare_entire_test_syntax_validation(
     return json.dumps(result, indent=2)
 
 
-# (auto_validation_flow tool removed; logic captured in SYSTEM_PROMPT protocol)
-
-
 async def main():
     """
     Main entry point for the MCP server.
@@ -739,9 +825,10 @@ async def main():
     print("🚀 E2E Migration MCP server starting using SSE transport")
     print(f"🤖 LLM Model: {LLM_CHAT_MODEL_NAME}")
     print(f"🔗 LLM Base URL: {LLM_BASE_URL}")
-    print(f"CLOUDN_PATH: {CLOUDN_PATH}")
-    print(f"TFVARS_PATH: {TFVARS_PATH}")
-    print(f"LLM_MODEL: {LLM_CHAT_MODEL_NAME}")
+    print(f"📁 CLOUDN_PATH: {CLOUDN_PATH}")
+    print(f"📁 TFVARS_PATH: {TFVARS_PATH}")
+    print(f"🗄️  DATA_PATH: {DATA_PATH}")
+    print(f"🤖 LLM_MODEL: {LLM_CHAT_MODEL_NAME}")
     await mcp.run_sse_async()
 
 
