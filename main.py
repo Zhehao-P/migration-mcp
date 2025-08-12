@@ -778,7 +778,7 @@ async def main():
         logger.error("Please set LLM_API_KEY in your .env file")
         raise RuntimeError("LLM_API_KEY environment variable is required but not set")
 
-    if not Path(DATA_PATH).exists():
+    if not DATA_PATH:
         logger.error("DATA_PATH environment variable is required but not set")
         logger.error("Please set DATA_PATH in your .env file")
         raise RuntimeError("DATA_PATH environment variable is required but not set")
