@@ -60,6 +60,8 @@ Rules:
 
 CLOUDN_E2E_FRAMEWORK_PROMPT = """
 Cloudn E2E framework basics:
+Check all files in the e2e test suite mc_spoke_transit_spoke_test first and use it as an example to
+understand the e2e test framework and below rules.
 - The framework provides a provider credential file (provider_cred.tfvars). Do not modify it.
 - Terraform topologies are applied before test execution. Variables come from vars.tf; outputs are exported via outputs.tf.
 - Use exported Terraform outputs in tests (e.g., tf.outputs["..."].value["name"]) to retrieve runtime values.
@@ -67,13 +69,12 @@ Cloudn E2E framework basics:
   1) Mismatched variable names between test code and tfvars.
   2) Forgetting to reference outputs for runtime resources.
   3) Treating comments/formatting differences as semantic changes.
-You can use the test with name mc_spoke_transit_spoke_test under the test directory
-as an example to understand the test framework.
+If you need more examples, please check other e2e test suites as well.
 """
 
 
 def read_files_with_extension(
-    directory_path: str, file_extension: str
+    directory_path: Path, file_extension: str
 ) -> tuple[str, list[str]]:
     """
     Helper function to read all files with a specific extension from a directory.
@@ -90,8 +91,7 @@ def read_files_with_extension(
     file_context = ""
     files_read = []
     # Convert to Path object for path operations
-    dir_path = Path(directory_path)
-    search_pattern = str(dir_path / f"*.{file_extension}")
+    search_pattern = str(directory_path / f"*.{file_extension}")
     files_found = glob.glob(search_pattern)
 
     if files_found:
@@ -154,7 +154,7 @@ class SQLiteService:
             )
             await db.commit()
 
-    async def get_entry(self, test_suite_name: str) -> tuple[str, str] | None:
+    async def get_entry(self, test_suite_name: str) -> tuple[Path, Path] | None:
         """Get an entry from the SQLite database"""
         async with aiosqlite.connect(str(self.db_path)) as db:
             test_data = await db.execute(
@@ -166,7 +166,7 @@ class SQLiteService:
                 # Create full paths
                 full_regression_path = str(Path(REGRESSION_PATH) / row[0])
                 full_cloudn_path = str(Path(CLOUDN_PATH) / row[1])
-                return full_regression_path, full_cloudn_path
+                return Path(full_regression_path), Path(full_cloudn_path)
             return None
 
 
@@ -351,6 +351,7 @@ async def terraform_coverage_validation(
     # Build full paths
     db_service = ctx.request_context.lifespan_context.db_service
     regression_full_path, cloudn_full_path = await db_service.get_entry(test_suite_name)
+    regression_full_path = regression_full_path / "testbed" / "topology"
 
     try:
         # Read all .tf files using helper function
