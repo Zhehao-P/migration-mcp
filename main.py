@@ -62,10 +62,11 @@ CLOUDN_E2E_FRAMEWORK_PROMPT = """
 Cloudn E2E framework basics:
 Check all files in the e2e test suite mc_spoke_transit_spoke_test first and use it as an example to
 understand the e2e test framework and below rules.
+- Please follow the example test suite naming convention.
 - The framework provides a provider credential file (provider_cred.tfvars). Do not modify it.
 - Terraform topologies are applied before test execution. Variables come from vars.tf; outputs are exported via outputs.tf.
 - Use exported Terraform outputs in tests (e.g., tf.outputs["..."].value["name"]) to retrieve runtime values.
-- Library already provides helper functions like ping for traffic validation.
+- Test library already provides helper functions like ping for traffic validation.
 - Only use custom helper functions if the framework library does not provide a suitable function.
 - Most helper functions have retry logic, so most of the manual sleep or wait can be avoided.
 - Typical pitfalls to avoid:
