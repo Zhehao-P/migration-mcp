@@ -65,6 +65,8 @@ understand the e2e test framework and below rules.
 - The framework provides a provider credential file (provider_cred.tfvars). Do not modify it.
 - Terraform topologies are applied before test execution. Variables come from vars.tf; outputs are exported via outputs.tf.
 - Use exported Terraform outputs in tests (e.g., tf.outputs["..."].value["name"]) to retrieve runtime values.
+- Only use custom helper functions if the framework library does not provide a suitable function.
+- Use the framework library functions to avoid manual wait or sleep.
 - Typical pitfalls to avoid:
   1) Mismatched variable names between test code and tfvars.
   2) Forgetting to reference outputs for runtime resources.
