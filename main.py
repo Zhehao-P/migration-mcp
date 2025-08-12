@@ -41,45 +41,21 @@ BASE_DIR = Path(__file__).parent
 SYSTEM_PROMPT = """
 This MCP server guides and validates the E2E test suite migration.
 
-Your tasks:
-1) Understand repository/test structure and migration context (use the get_context tool).
-2) Validate Terraform topology coverage and Python test logic coverage.
-3) When both coverage validations pass, prepare and run syntax validations in the specified directories.
-4) Surface clear, actionable differences if any, and keep outputs concise.
-
-Post-change protocol (run this after EVERY code change):
-1) Terraform coverage
-   - Call terraform_coverage_validation with regression and cloudn paths.
-   - Parse the last line: "Overall Verdict: True | False | Error".
-   - If verdict != True: STOP and output a numbered Differences list with concrete fixes.
-2) Terraform syntax
-   - If Terraform coverage is True: call prepare_terraform_syntax_validation(test_suite_name).
-   - Present execution_path and execution_command. You MUST execute the command in that exact directory:
-     cd "<execution_path>" && <execution_command>
-   - Capture stdout/stderr and exit code. Treat any non-zero exit code or lines containing "Error:" (Terraform) as failure.
-   - Summarize key errors (2-5 lines) and provide actionable fixes.
-   - If you cannot run commands in this environment, instruct the operator to run the exact command above and paste back the output for your analysis.
-3) Python coverage
-   - Only after Terraform coverage and syntax are OK: call python_coverage_validation.
-   - Parse the last line: "Overall Verdict: True | Ok | False | Error".
-   - If verdict in {False, Error}: STOP and output a numbered Differences list with concrete fixes.
-4) Python syntax
-   - If Python coverage is True or Ok: call entire_test_validation_preparation(test_suite_name).
-   - Present execution_path and execution_command. You MUST execute the command in that exact directory:
-     cd "<execution_path>" && <execution_command>
-   - Capture stdout/stderr and exit code. For pytest, treat any failures/errors or non-zero exit as failure; report the failing tests summary and first error trace succinctly.
-   - If you cannot run commands in this environment, instruct the operator to run the exact command above and paste back the output for your analysis.
+Migration Workflow:
+1. get_context() - Understand test structure and migration context
+2. Create testplan.md - Analyze original code and create comprehensive test plan before migration
+3. After migration changes:
+   a. terraform_coverage_validation() - Validate topology equivalence
+   b. prepare_terraform_syntax_validation() + run command - Test Terraform syntax
+   c. python_coverage_validation() - Validate test logic equivalence
+   d. entire_test_validation_preparation() + run command - Test Python execution
 
 Rules:
-- Be precise, deterministic, and concise. Prefer bullet points over long prose.
-- Only include facts from provided contexts. If context is insufficient, return an explicit error reason.
-- Ignore non-semantic differences (formatting, comments, import order, cosmetic renames without behavior change).
-- Use the exact verdict labels defined by each tool (Terraform: True/False/Error; Python: True/Ok/False/Error).
-- Keep your analysis ≤ 600 tokens unless explicitly allowed.
-
-Completion criteria:
-- Coverage validations acceptable.
-- Syntax validations run in the specified directories, with reports/logs showing no errors.
+- Follow the workflow sequence strictly
+- Fix issues when validation tools return False/Error before proceeding
+- Re-run validation tools after making fixes
+- Execute commands in the exact paths provided by preparation tools
+- Be concise and actionable in analysis
 """
 
 CLOUDN_E2E_FRAMEWORK_PROMPT = """
@@ -322,10 +298,8 @@ async def terraform_coverage_validation(
 ) -> str:
     """
     This tool is used to validate the Terraform topology coverage for the input test suite.
-    It compares the testbed topology using all .tf files from both regression and cloudn paths
-    and evaluate if the migrated e2e test topology is the same as the original regression
-    test topology. If validation result is False, you need to check the analysis and fix the
-    issue if the analysis is valid.
+    If validation result is False, please fix the issue if the provided analysis is valid.
+    Use this tool again to validate again if any Terraform files are changed.
 
     Args:
         test_suite_name: The name of the test suite.
@@ -501,10 +475,8 @@ async def python_coverage_validation(
 ) -> str:
     """
     This tool is used to compare the Python test logic coverage for the input test suite.
-    It compares the test logic using all .py files from both regression and cloudn paths
-    and evaluate if the migrated e2e test logic is the same as the original regression
-    test logic. If validation result is False, you need to check the analysis and fix the
-    issue if the analysis is valid.
+    If validation result is False, please fix the issue if the provided analysis is valid.
+    Use this tool again to validate again if any Python files are changed.
 
     Args:
         test_suite_name: The name of the test suite.
@@ -652,8 +624,8 @@ async def prepare_terraform_syntax_validation(
     """
     Use this tool to prepare the testing environment for the input test suite Terraform topology,
     and get validation command to execute and where to run the command.
-    Terraform credentials file is provided by the test framework already and should not be modified.
-    Please run the command in the given directory. And verify the result.
+    Please run the execution_command in the given execution_path. Fix any seen issue until the
+    given command can run successfully.
 
     Args:
         test_suite_name: The name of the test suite to execute
@@ -719,8 +691,8 @@ async def prepare_entire_test_syntax_validation(
     """
     Use this tool to prepare the testing environment for the input test suite,
     and get execution command to execute and where to run the command.
-    Terraform credentials file is provided by the test framework already and should not be modified.
-    Please run the command in the given directory. And verify the result.
+    Please run the execution_command in the given execution_path. Fix any seen issue until the
+    given command can run successfully, and the given report and log shows no errors.
 
     Args:
         test_suite_name: The name of the test suite to execute
