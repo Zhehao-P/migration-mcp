@@ -125,7 +125,7 @@ def read_files_with_extension(
                 file_context += file_content
                 file_context += f"\n=== End of {file_name} ===\n\n"
                 files_read.append(file_name)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 file_context += f"Error reading {file_path}: {str(e)}\n\n"
     else:
         file_context = f"No .{file_extension} files found in {directory_path}"
@@ -149,7 +149,7 @@ class SQLiteService:
                 """
                 CREATE TABLE IF NOT EXISTS test_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    test_folder_name TEXT UNIQUE NOT NULL,
+                    test_suite_name TEXT UNIQUE NOT NULL,
                     regression_path TEXT NOT NULL,
                     cloudn_path TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -161,35 +161,32 @@ class SQLiteService:
         logger.info("🗄️  SQLite database initialized at: %s", self.db_path)
 
     async def add_entry(
-        self, test_folder_name: str, regression_path: str, cloudn_path: str
+        self, test_suite_name: str, regression_path: str, cloudn_path: str
     ) -> None:
         """Add an entry to the SQLite database"""
         async with aiosqlite.connect(str(self.db_path)) as db:
             await db.execute(
                 """
-                INSERT OR REPLACE INTO test_data (test_folder_name, regression_path, cloudn_path, updated_at)
+                INSERT OR REPLACE INTO test_data (test_suite_name, regression_path, cloudn_path, updated_at)
                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             """,
-                (test_folder_name, regression_path, cloudn_path),
+                (test_suite_name, regression_path, cloudn_path),
             )
             await db.commit()
 
-    async def get_entry(self, test_folder_name: str) -> dict[str, str] | None:
+    async def get_entry(self, test_suite_name: str) -> tuple[str, str] | None:
         """Get an entry from the SQLite database"""
         async with aiosqlite.connect(str(self.db_path)) as db:
             test_data = await db.execute(
-                "SELECT regression_path, cloudn_path FROM test_data WHERE test_folder_name = ?",
-                (test_folder_name,),
+                "SELECT regression_path, cloudn_path FROM test_data WHERE test_suite_name = ?",
+                (test_suite_name,),
             )
             row = await test_data.fetchone()
             if row:
                 # Create full paths
                 full_regression_path = str(Path(REGRESSION_PATH) / row[0])
                 full_cloudn_path = str(Path(CLOUDN_PATH) / row[1])
-                return {
-                    "regression_path": full_regression_path,
-                    "cloudn_path": full_cloudn_path,
-                }
+                return full_regression_path, full_cloudn_path
             return None
 
 
@@ -232,12 +229,15 @@ async def test_openai_client_ready(client: AsyncOpenAI) -> None:
 
     except Exception as e:
         error_msg = f"OpenAI client test failed: {str(e)}"
-        logger.error(f"❌ {error_msg}")
+        logger.error("❌ %s", error_msg)
         raise RuntimeError(error_msg) from e
 
 
 @asynccontextmanager
 async def mcp_lifespan(server: FastMCP) -> AsyncIterator[MCPContext]:
+    """
+    Lifespan context manager for the MCP server.
+    """
     logger.info("Initialize TestContext")
     test_execution_dir = Path(CLOUDN_PATH) / "test-scripts" / "end-to-end"
     log_dir = test_execution_dir / "logs"
@@ -290,17 +290,19 @@ async def get_context(ctx: Context, test_path_under_regression: str) -> str:
         A string containing the context about the migration task.
     """
 
-    test_name = test_path_under_regression.split("/")[-1]
-    cloudn_test_path = f"test-scripts/end-to-end/tests/{test_name}"
+    test_suite_name = test_path_under_regression.split("/")[-1]
+    cloudn_test_path = f"test-scripts/end-to-end/tests/{test_suite_name}"
     db_service = ctx.request_context.lifespan_context.db_service
 
-    await db_service.add_entry(test_name, test_path_under_regression, cloudn_test_path)
-    logger.info("Added entry to SQLite database: %s", test_name)
+    await db_service.add_entry(
+        test_suite_name, test_path_under_regression, cloudn_test_path
+    )
+    logger.info("Added entry to SQLite database: %s", test_suite_name)
 
     response = (
         "Please read the following information carefully and use it to guide your work.\n"
         f"Please placed the migrated test suite under the '{cloudn_test_path}' in Cloudn.\n"
-        f"Use the test suite name '{test_name}' as test_name parameter when using MCP tools.\n"
+        f"Use the test suite name '{test_suite_name}' as test_suite_name parameter when using MCP tools.\n"
         f"Regression test directory path: {REGRESSION_PATH}\n"
         f"Regression libraries path: {REGRESSION_PATH}/avxt/lib/, {REGRESSION_PATH}/autotest/lib/api_pages/\n"
         f"Regression Terraform module path: {REGRESSION_PATH}/avxt/terraform/\n"
@@ -316,8 +318,7 @@ async def get_context(ctx: Context, test_path_under_regression: str) -> str:
 @mcp.tool(name="terraform_coverage_validation")
 async def terraform_coverage_validation(
     ctx: Context,
-    test_path_under_regression: str,
-    test_path_under_cloudn: str,
+    test_suite_name: str,
 ) -> str:
     """
     This tool is used to validate the Terraform topology coverage for the input test suite.
@@ -327,13 +328,7 @@ async def terraform_coverage_validation(
     issue if the analysis is valid.
 
     Args:
-        test_path_under_regression: Relative path under `REGRESSION_PATH` to the test suite ROOT directory (NOT including `testbed/topology`).
-            - What to pass: the test suite folder path. The tool will append `/testbed/topology` automatically.
-            - Example (correct): `autotest/end2end/nat/arm_single_ip_snat`
-            - Example (common but wrong): `autotest/end2end/nat/arm_single_ip_snat/testbed/topology` (will cause "no .tf files found" unless normalized)
-        test_path_under_cloudn: Relative path under `CLOUDN_PATH` to the directory that contains the actual Terraform `.tf` files to compare.
-            - What to pass: the Cloudn topology/module directory that directly contains `.tf` files.
-            - Example: `test-scripts/end-to-end/vendor/nat/arm_single_ip_snat`
+        test_suite_name: The name of the test suite.
 
     Returns:
         JSON string containing validation result with structure:
@@ -376,10 +371,8 @@ async def terraform_coverage_validation(
     """
 
     # Build full paths
-    regression_full_path = (
-        Path(REGRESSION_PATH) / test_path_under_regression / "testbed" / "topology"
-    )
-    cloudn_full_path = Path(CLOUDN_PATH) / test_path_under_cloudn
+    db_service = ctx.request_context.lifespan_context.db_service
+    regression_full_path, cloudn_full_path = await db_service.get_entry(test_suite_name)
 
     try:
         # Read all .tf files using helper function
@@ -485,7 +478,7 @@ async def terraform_coverage_validation(
 
         return json.dumps(result, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_result = {
             "validation_result": "Error",
             "analysis": "",
@@ -504,8 +497,7 @@ async def terraform_coverage_validation(
 @mcp.tool(name="python_coverage_validation")
 async def python_coverage_validation(
     ctx: Context,
-    test_path_under_regression: str,
-    test_path_under_cloudn: str,
+    test_suite_name: str,
 ) -> str:
     """
     This tool is used to compare the Python test logic coverage for the input test suite.
@@ -515,10 +507,8 @@ async def python_coverage_validation(
     issue if the analysis is valid.
 
     Args:
-        test_path_under_regression: Relative path under `REGRESSION_PATH` to the Python test files directory (expected logic).
-            - Example: `autotest/end2end/nat/arm_single_ip_snat/tests`
-        test_path_under_cloudn: Relative path under `CLOUDN_PATH` to the migrated Python test files directory (actual logic).
-            - Example: `test-scripts/end-to-end/tests/nat/arm_single_ip_snat`
+        test_suite_name: The name of the test suite.
+
 
     Returns:
         JSON string containing validation result with structure:
@@ -559,9 +549,8 @@ async def python_coverage_validation(
     - Error: Context insufficient or unparsable (state what is missing).
     - Keep the whole response ≤ 600 tokens.
     """
-    # Build full paths
-    regression_full_path = Path(REGRESSION_PATH) / test_path_under_regression
-    cloudn_full_path = Path(CLOUDN_PATH) / test_path_under_cloudn
+    db_service = ctx.request_context.lifespan_context.db_service
+    regression_full_path, cloudn_full_path = await db_service.get_entry(test_suite_name)
 
     try:
 
@@ -639,7 +628,7 @@ async def python_coverage_validation(
 
         return json.dumps(result, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_result = {
             "validation_result": "Error",
             "analysis": "",
@@ -681,11 +670,9 @@ async def prepare_terraform_syntax_validation(
         }
     """
 
-    test_execution_dir = ctx.request_context.lifespan_context.test_execution_dir
-
-    # Set working directory
-    relative_test_dir = f"tests/{test_suite_name}"
-    test_dir = test_execution_dir / relative_test_dir
+    db_service = ctx.request_context.lifespan_context.db_service
+    _, cloudn_full_path = await db_service.get_entry(test_suite_name)
+    test_dir = cloudn_full_path
 
     # Prepare commands
     cp_command = f"cp {TFVARS_PATH} {test_dir}/{TFVARS_FILE_NAME}"
