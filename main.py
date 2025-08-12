@@ -67,11 +67,13 @@ Cloudn E2E framework basics:
   1) Mismatched variable names between test code and tfvars.
   2) Forgetting to reference outputs for runtime resources.
   3) Treating comments/formatting differences as semantic changes.
+You can use the test with name mc_spoke_transit_spoke_test under the test directory
+as an example to understand the test framework.
 """
 
 
 def read_files_with_extension(
-    directory_path: Path, file_extension: str
+    directory_path: str, file_extension: str
 ) -> tuple[str, list[str]]:
     """
     Helper function to read all files with a specific extension from a directory.
@@ -87,7 +89,9 @@ def read_files_with_extension(
     """
     file_context = ""
     files_read = []
-    search_pattern = str(directory_path / f"*.{file_extension}")
+    # Convert to Path object for path operations
+    dir_path = Path(directory_path)
+    search_pattern = str(dir_path / f"*.{file_extension}")
     files_found = glob.glob(search_pattern)
 
     if files_found:
@@ -277,7 +281,7 @@ async def get_context(ctx: Context, test_path_under_regression: str) -> str:
 
     response = (
         "Please read the following information carefully and use it to guide your work.\n"
-        f"Please placed the migrated test suite under the '{cloudn_test_path}' in Cloudn.\n"
+        f"Use the given '{cloudn_test_path}' as the migrated test suite directory in Cloudn.\n"
         f"Use the test suite name '{test_suite_name}' as test_suite_name parameter when using MCP tools.\n"
         f"Regression test directory path: {REGRESSION_PATH}\n"
         f"Regression libraries path: {REGRESSION_PATH}/avxt/lib/, {REGRESSION_PATH}/autotest/lib/api_pages/\n"
