@@ -32,7 +32,7 @@ LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
 LLM_CHAT_MODEL_NAME: str = os.getenv("LLM_CHAT_MODEL_NAME", "gpt-3.5-turbo")
 
 # Data Configuration
-DATA_PATH: str = os.getenv("DATA_PATH", "./data")
+DATA_PATH: str = os.getenv("DATA_PATH", "")
 
 # Base directory
 BASE_DIR = Path(__file__).parent
@@ -818,6 +818,11 @@ async def main():
         logger.error("LLM_API_KEY environment variable is required but not set")
         logger.error("Please set LLM_API_KEY in your .env file")
         raise RuntimeError("LLM_API_KEY environment variable is required but not set")
+
+    if not Path(DATA_PATH).exists():
+        logger.error("DATA_PATH environment variable is required but not set")
+        logger.error("Please set DATA_PATH in your .env file")
+        raise RuntimeError("DATA_PATH environment variable is required but not set")
 
     mcp_tools = await mcp.list_tools()
     print("📦 Registered tools:", [t.name for t in mcp_tools])
